@@ -1,0 +1,447 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CLIENT
+  OWNER
+  AGENT
+  ADMIN
+  PARTNER
+}
+
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  LAND
+  COMMERCIAL
+  OFFICE
+}
+
+enum PropertyStatus {
+  AVAILABLE
+  SOLD
+  RENTED
+  PENDING
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum DocumentType {
+  ID
+  PROOF_OF_INCOME
+  BANK_STATEMENT
+  CONTRACT
+  PROPERTY_DEED
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COUNTER_OFFER
+}
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  SIGNED
+  COMPLETED
+  CANCELLED
+}
+
+enum WritingStatus {
+  PENDING_SIGNATURES
+  SIGNATURES_COMPLETE
+  PENDING_NOTARY
+  IN_NOTARY
+  NOTARY_APPROVED
+  REGISTERED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+// Usuario principal con roles
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String?
+  name          String?
+  phone         String?
+  avatar        String?
+  role          UserRole  @default(CLIENT)
+  emailVerified DateTime?
+  verificationCode String?
+  verificationExpiresAt DateTime?
+
+  // Campos para baneo de usuarios
+  isBanned      Boolean   @default(false)
+  bannedAt      DateTime?
+  bannedReason  String?
+  bannedBy      String?   // ID del admin que baneó al usuario
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relaciones
+  properties       Property[]
+  clientAppointments  Appointment[] @relation("ClientAppointments")
+  agentAppointments   Appointment[] @relation("AgentAppointments")
+  documents        Document[]
+  offers           Offer[]
+  clientContracts  Contract[] @relation("ClientContracts")
+  agentContracts   Contract[] @relation("AgentContracts")
+  sentMessages     Message[]
+  propertyViews    PropertyView[]
+  
+  // Relaciones para firmas y escrituras
+  digitalSignatures DigitalSignature[]
+  buyerWritings    WritingProcess[]    @relation("WritingBuyer")
+  sellerWritings   WritingProcess[]    @relation("WritingSeller")
+  agentWritings    WritingProcess[]    @relation("WritingAgent")
+  writingActivities WritingActivity[]
+  notifications    Notification[]
+  contractTemplates ContractTemplate[]
+
+  @@map("users")
+}
+
+// Propiedad inmobiliaria
+model Property {
+  id            String         @id @default(cuid())
+  title         String
+  description   String?
+  price         Float
+  currency      String         @default("MXN")
+  type          PropertyType
+  status        PropertyStatus @default(AVAILABLE)
+  bedrooms      Int?
+  bathrooms     Int?
+  area          Float? // en metros cuadrados
+  landArea      Float? // terreno
+  address       String
+  city          String
+  state         String
+  zipCode       String?
+  latitude      Float?
+  longitude     Float?
+  features      String? // amenidades (JSON string)
+  images        String? // URLs de imágenes (JSON string)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relaciones
+  ownerId       String
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+  documents     Document[]
+  offers        Offer[]
+  views         PropertyView[]
+  writings      WritingProcess[]    @relation("PropertyWritings")
+
+  @@map("properties")
+}
+
+// Citas para visitas
+model Appointment {
+  id          String            @id @default(cuid())
+  date        DateTime
+  duration    Int               @default(60) // minutos
+  status      AppointmentStatus @default(PENDING)
+  notes       String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relaciones
+  clientId    String
+  client      User              @relation("ClientAppointments", fields: [clientId], references: [id], onDelete: Cascade)
+  propertyId  String
+  property    Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agentId     String?
+  agent       User?             @relation("AgentAppointments", fields: [agentId], references: [id])
+  messages    Message[]
+
+  @@unique([date, agentId])
+  @@map("appointments")
+}
+
+// Mensajes en citas
+model Message {
+  id            String     @id @default(cuid())
+  content       String
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relaciones
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  senderId      String
+  sender        User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+// Documentos de usuarios y propiedades
+model Document {
+  id          String         @id @default(cuid())
+  name        String
+  type        DocumentType
+  url         String
+  size        Int
+  mimeType    String
+  status      DocumentStatus @default(PENDING)
+  uploadedAt  DateTime       @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+  notes       String?
+
+  // Relaciones
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId  String?
+  property    Property?      @relation(fields: [propertyId], references: [id])
+
+  @@map("documents")
+}
+
+// Ofertas de compra/renta
+model Offer {
+  id            String       @id @default(cuid())
+  amount        Float
+  currency      String       @default("MXN")
+  status        OfferStatus  @default(PENDING)
+  conditions    String?
+  counterAmount Float?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relaciones
+  clientId      String
+  client        User         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  propertyId    String
+  property      Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@map("offers")
+}
+
+// Contratos
+model Contract {
+  id          String          @id @default(cuid())
+  title       String
+  content     String
+  status      ContractStatus  @default(DRAFT)
+  signedAt    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relaciones
+  clientId    String
+  client      User            @relation("ClientContracts", fields: [clientId], references: [id], onDelete: Cascade)
+  agentId     String?
+  agent       User?           @relation("AgentContracts", fields: [agentId], references: [id])
+  
+  // Relaciones para firmas y escrituras
+  signatures  DigitalSignature[]  @relation("ContractSignatures")
+  writing     WritingProcess?
+
+  @@map("contracts")
+}
+
+// Visitas a propiedades (tracking de vistas)
+model PropertyView {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  ipAddress   String?
+  userAgent   String?
+  referrer    String?
+  viewedAt    DateTime @default(now())
+
+  // Relaciones
+  @@map("property_views")
+}
+
+model HeroImage {
+  id                        String   @id @default(cuid())
+  title                     String?
+  description               String?
+  imageUrl                  String
+  order                     Int      @default(0)
+  isActive                  Boolean  @default(true)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  // Campos para overlay de texto personalizado
+  overlayTitle              String?
+  overlaySubtitle           String?
+  overlayTitleColor         String?  @default("#ffffff")
+  overlaySubtitleColor      String?  @default("#ffffff")
+  overlayPosition           String?  @default("center")
+  overlayBackgroundColor    String?  @default("#000000")
+  overlayBackgroundOpacity  Float?   @default(0.5)
+
+  @@map("hero_images")
+}
+
+// ===== MODELOS PARA FIRMAS DIGITALES, ESCRITURAS Y KPIs =====
+
+// 1. Firmas Digitales
+model DigitalSignature {
+  id            String    @id @default(cuid())
+  contractId    String
+  contract      Contract  @relation("ContractSignatures", fields: [contractId], references: [id], onDelete: Cascade)
+  signedBy      String    // ID del usuario que firma
+  signer        User      @relation(fields: [signedBy], references: [id])
+  signatureData String    // Base64 de la firma
+  ipAddress     String?
+  userAgent     String?   // Dispositivo
+  signedAt      DateTime  @default(now())
+  timestamp     String    // Timestamp del servidor
+  documentHash  String?   // Hash SHA256 del documento para verificación
+  
+  @@unique([contractId, signedBy])
+  @@map("digital_signatures")
+}
+
+// 2. Proceso de Escritura
+model WritingProcess {
+  id                String         @id @default(cuid())
+  contractId        String         @unique
+  contract          Contract       @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  propertyId        String
+  property          Property       @relation("PropertyWritings", fields: [propertyId], references: [id])
+  
+  status            WritingStatus  @default(PENDING_SIGNATURES)
+  
+  // Participantes
+  buyerId           String
+  buyer             User           @relation("WritingBuyer", fields: [buyerId], references: [id])
+  sellerId          String
+  seller            User           @relation("WritingSeller", fields: [sellerId], references: [id])
+  agentId           String?
+  agent             User?          @relation("WritingAgent", fields: [agentId], references: [id])
+  
+  // Documentos requeridos (JSON array)
+  buyerDocs         String?
+  sellerDocs        String?
+  
+  // Notaría
+  notaryId          String?
+  notaryName        String?
+  notaryDate        DateTime?
+  
+  // Registro
+  registeredAt      DateTime?
+  registryNumber    String?
+  
+  // Seguimiento
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  completedAt       DateTime?
+  
+  // Relaciones
+  activities        WritingActivity[]
+  notifications     Notification[]
+
+  @@map("writing_processes")
+}
+
+// 3. Historial de Actividades para Escritura
+model WritingActivity {
+  id              String         @id @default(cuid())
+  writingId       String
+  writing         WritingProcess @relation(fields: [writingId], references: [id], onDelete: Cascade)
+  
+  action          String         // "signature_added", "document_uploaded", "status_changed", etc.
+  description     String
+  performedBy     String?        // ID del usuario
+  performer       User?          @relation(fields: [performedBy], references: [id])
+  
+  oldStatus       String?
+  newStatus       String?
+  
+  metadata        String?        // JSON con datos adicionales
+  createdAt       DateTime       @default(now())
+
+  @@map("writing_activities")
+}
+
+// 4. KPIs y Métricas
+model TestModel {
+  id                  String         @id @default(cuid())
+  date                DateTime       @default(now())
+  role                String
+  userId              String?
+  activeProperties    Int            @default(0)
+  createdAt           DateTime       @default(now())
+
+  @@unique([date, role, userId])
+  @@map("test_models")
+}
+
+// 5. Notificaciones Estructuradas
+model Notification {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type            String         // "CONTRACT_SIGNED", "WRITING_STATUS", "KPI_ALERT", etc.
+  title           String
+  message         String
+  
+  // Referencias
+  contractId      String?
+  writingId       String?
+  writing         WritingProcess? @relation(fields: [writingId], references: [id], onDelete: SetNull)
+  
+  isRead          Boolean        @default(false)
+  readAt          DateTime?
+  
+  createdAt       DateTime       @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// 6. Template de Contratos
+model ContractTemplate {
+  id              String         @id @default(cuid())
+  name            String
+  type            String         // "INTERMEDIATION", "PURCHASE", "RENTAL", etc.
+  content         String         // HTML del contrato
+  placeholders    String         // JSON con variables {BUYER_NAME}, {PRICE}, etc.
+  
+  active          Boolean        @default(true)
+  createdBy       String
+  creator         User           @relation(fields: [createdBy], references: [id])
+  
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@map("contract_templates")
+}
