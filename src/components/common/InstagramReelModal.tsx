@@ -115,7 +115,7 @@ export default function InstagramReelModal({
           {/* Video */}
           <video
             ref={videoRef}
-            src="/video.mp4"
+            src="/tksa.mp4"
             className="w-full h-full object-contain"
             muted={isMuted}
             onLoadedMetadata={handleVideoMetadata}
